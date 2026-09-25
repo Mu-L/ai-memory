@@ -55,6 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged — this only makes the existing warning reliably visible. (#903)
 
 ### Fixed
+- OMP (OpenClaw) tool calls are recorded again. OMP was missing from the
+  closed-tool-agent set, so its tool events fell through the OpenCode-only
+  legacy body reader and produced an empty excerpt — nothing reached session
+  pages, handoffs, or consolidation. OMP now renders through the Pi tool
+  schema like the other closed-tool agents (only `output` is kept as the
+  excerpt; `args`/`details` stay excluded, still through the sanitizer). (#913)
 - A page whose `expires_at` is a bare date (`2026-10-01`) now gets an OKF
   `stale_after` that names the instant the TTL expires it
   (`2026-10-01T23:59:59.999999Z`) instead of the date copied verbatim. OKF
