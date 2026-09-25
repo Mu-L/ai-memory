@@ -18,13 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mean latency instead of 20.2 s — in that run the hosted mean sat on the
   server's 20 s completion timeout, which made the reranker stall every
   query before falling back. (#873)
-- `ai-memory status --workspace <name> --project <name>` scopes the `links`
-  line, and its `typed edges` detail, to one project instead of the whole
-  store. `GET /admin/status` accepts the same optional pair and answers with a
-  new `links_scope` object (`ScopeLinkStatus`); naming only one of the two is
-  a `400`, an unknown scope the usual `404`. Without the pair the response and
-  the human output are byte-identical to before, so the endpoint stays a plain
-  health probe. (#911)
 - `ai-memory status` (text and `--json`) and `GET /admin/status` report the
   server's HTTP exposure, so an unauthenticated bind is pollable by a monitor.
   The verdict is admin-gated at parity with the existing `bind`/`data_dir`
@@ -323,11 +316,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both sat in `links` with `to_page_id = NULL` and were visible only as
   `unresolved:` in `ai-memory status`. Both routes now skip a directory
   target, or a stem-less `.md`, with the existing warning. (#915)
-- `memory_lint` now reports unresolved same-project links. Only cross-project
-  dangling edges (`DanglingCrossLink`) were reported, so a link to a missing
-  page in the same project stayed invisible outside the status counter;
-  `ReaderPool::dangling_internal_links` now feeds the same `broken_link`
-  findings. (#911)
 
 ## [2.4.0] - 2026-09-21
 

@@ -1137,11 +1137,6 @@ pub struct StatusReport {
     pub counts: ai_memory_store::StatusCounts,
     /// Derived-index and retrieval-readiness diagnostics.
     pub derived: ai_memory_store::DerivedIndexStatus,
-    /// Link counters for the scope named in the query string, when one was
-    /// given (`ai-memory status --workspace/--project`). `None` for every
-    /// caller that names none — the response then carries exactly the fields
-    /// it always has.
-    pub links_scope: Option<ai_memory_store::ScopeLinkStatus>,
     /// Physical storage figures — file size and reclaimable free pages — so an
     /// operator can decide whether a `VACUUM` is worth its exclusive lock.
     pub storage: ai_memory_store::StorageStatus,
@@ -1188,46 +1183,7 @@ async fn handle_list_projects(State(state): State<Arc<AdminState>>) -> impl Into
     }
 }
 
-/// Query string for `GET /admin/status`: the optional scope whose own link
-/// counters the report should carry (`ai-memory status
-/// --workspace/--project`). Without a scope the report is the store-wide one
-/// it has always been — this endpoint is also the health probe, so nothing
-/// about the unscoped response may change.
-#[derive(Debug, Deserialize)]
-struct StatusScopeQuery {
-    /// Workspace name.
-    workspace: Option<String>,
-    /// Project name within the workspace.
-    project: Option<String>,
-}
-
-async fn handle_status(
-    State(state): State<Arc<AdminState>>,
-    Query(scope): Query<StatusScopeQuery>,
-) -> impl IntoResponse {
-    // Additive only: the scoped figures are computed when a scope was named,
-    // and never for the plain health probe.
-    let links_scope = match (
-        trimmed_opt(scope.workspace.as_deref()),
-        trimmed_opt(scope.project.as_deref()),
-    ) {
-        (Some(ws), Some(proj)) => match lookup_ws_proj_no_create(&state, ws, proj).await {
-            Ok((ws, proj)) => match state.reader.link_status_for_scope(ws, proj).await {
-                Ok(status) => Some(status),
-                Err(e) => return internal_err(e.to_string()),
-            },
-            Err(e) => return e,
-        },
-        (Some(_), None) | (None, Some(_)) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "error": "workspace and project must be provided together"
-                })),
-            );
-        }
-        _ => None,
-    };
+async fn handle_status(State(state): State<Arc<AdminState>>) -> impl IntoResponse {
     match state.reader.status_counts().await {
         Ok(counts) => match state.reader.derived_index_status().await {
             Ok(derived) => {
@@ -1249,7 +1205,6 @@ async fn handle_status(
                     db_path: state.db_path.display().to_string(),
                     counts,
                     derived,
-                    links_scope,
                     storage,
                     providers: state.provider_health.snapshot(),
                     ingest: state.ingest_metrics.snapshot(),
