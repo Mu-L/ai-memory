@@ -97,6 +97,28 @@ struct SweepTuning {
     compact_cold_episodic: bool,
 }
 
+/// How the HTTP listener is exposed, as reported by `/admin/status`.
+///
+/// `serve` already refuses to start in the genuinely indefensible cases and
+/// prints a banner for the rest (#902). This carries the same verdict to a
+/// surface an operator can poll after deploy, which is the half that catches a
+/// `.env.production` where `AI_MEMORY_AUTH_TOKEN` was never filled in — nobody
+/// is watching the startup output of a container three weeks later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HttpExposureReport {
+    /// Loopback-only, or authenticated.
+    Safe,
+    /// Unauthenticated on a non-loopback address by explicit operator override.
+    UnauthenticatedByOverride,
+    /// Unauthenticated inside a container, where the bind address proves
+    /// nothing about reachability — the host publish spec decides.
+    UnauthenticatedInContainer,
+    /// The server never recorded a verdict. Reported rather than guessed: an
+    /// older server behind a newer CLI, or a transport that never binds HTTP.
+    Unknown,
+}
+
 /// Shared state for the admin router.
 #[derive(Clone)]
 pub struct AdminState {
@@ -133,6 +155,11 @@ pub struct AdminState {
     pub db_path: PathBuf,
     /// Server's bind address — informational, surfaced in /admin/status.
     pub bind: String,
+    /// HTTP exposure verdict, recorded by `serve` once the listener is bound.
+    /// A cell rather than a plain value because the verdict needs the *bound*
+    /// address, which is only known after `AdminState` is built. Unset reads as
+    /// [`HttpExposureReport::Unknown`].
+    pub http_exposure: Arc<std::sync::OnceLock<HttpExposureReport>>,
     /// Server home directory resolved once at config load. Used to keep admin
     /// audits consistent with the hook router's cwd-prefix guard.
     pub home_dir: Option<String>,
@@ -1131,6 +1158,10 @@ pub struct StatusReport {
     pub data_dir: String,
     /// Bind address the HTTP transport is listening on.
     pub bind: String,
+    /// Whether that bind is reachable without a credential (#902). Polled
+    /// after deploy, this catches the unauthenticated case that a startup-only
+    /// banner cannot.
+    pub http_exposure: HttpExposureReport,
     /// Absolute SQLite path inside `data_dir`.
     pub db_path: String,
     /// Lifetime counts: pages_latest, pages_all, sessions, observations.
@@ -1202,6 +1233,11 @@ async fn handle_status(State(state): State<Arc<AdminState>>) -> impl IntoRespons
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     data_dir: state.data_dir.display().to_string(),
                     bind: state.bind.clone(),
+                    http_exposure: state
+                        .http_exposure
+                        .get()
+                        .copied()
+                        .unwrap_or(HttpExposureReport::Unknown),
                     db_path: state.db_path.display().to_string(),
                     counts,
                     derived,
@@ -7675,6 +7711,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -7742,6 +7779,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49376".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -7865,6 +7903,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49375".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -8099,6 +8138,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -8293,6 +8333,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -8473,6 +8514,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -8830,6 +8872,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -10318,6 +10361,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -10428,6 +10472,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -10531,6 +10576,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -10640,6 +10686,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
@@ -11188,6 +11235,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: Some(pepper),
@@ -11245,6 +11293,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: Some(pepper.clone()),
@@ -11681,6 +11730,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: Some(ai_memory_store::TokenPepper::new("test-pepper-admin")),
@@ -11813,6 +11863,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: Some(ai_memory_store::TokenPepper::new("test-pepper-admin")),
@@ -12244,6 +12295,7 @@ mod tests {
             data_dir: tmp.path().to_path_buf(),
             db_path: store.db_path().to_path_buf(),
             bind: "127.0.0.1:49374".to_string(),
+            http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
             home_dir: None,
             bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
             token_pepper: None,
