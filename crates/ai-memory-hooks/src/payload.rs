@@ -628,6 +628,7 @@ const fn closed_tool_agent(agent: AgentKind) -> bool {
             | AgentKind::Codex
             | AgentKind::OpenCode
             | AgentKind::Pi
+            | AgentKind::Omp
             | AgentKind::AntigravityCli
             | AgentKind::Hermes
             | AgentKind::Pool
@@ -2747,40 +2748,78 @@ mod tests {
     }
 
     #[test]
-    fn pi_post_outcomes_and_stable_id_are_rendered() {
-        for (is_error, outcome) in [
-            (Some(false), "success"),
-            (Some(true), "error"),
-            (None, "unknown"),
-        ] {
-            let mut raw = serde_json::json!({"tool":"bash","args":{},"callID":"pi-stable-190","output":"result"});
-            if let Some(is_error) = is_error {
-                raw["isError"] = serde_json::json!(is_error);
+    fn pi_and_omp_post_outcomes_and_stable_id_are_rendered() {
+        for agent in ["pi", "omp"] {
+            for (is_error, outcome) in [
+                (Some(false), "success"),
+                (Some(true), "error"),
+                (None, "unknown"),
+            ] {
+                let mut raw = serde_json::json!({"tool":"bash","args":{},"callID":"pi-stable-190","output":"result"});
+                if let Some(is_error) = is_error {
+                    raw["isError"] = serde_json::json!(is_error);
+                }
+                let pre = HookEnvelope::from_query_and_body(
+                    HookQuery {
+                        event: "pre-tool-use".into(),
+                        agent: Some(agent.into()),
+                        ..Default::default()
+                    },
+                    raw.clone(),
+                );
+                let post = HookEnvelope::from_query_and_body(
+                    HookQuery {
+                        event: "post-tool-use".into(),
+                        agent: Some(agent.into()),
+                        ..Default::default()
+                    },
+                    raw,
+                );
+                assert!(
+                    pre.body_excerpt
+                        .unwrap()
+                        .contains("tool_call_id: pi-stable-190")
+                );
+                let body = post.body_excerpt.unwrap();
+                assert!(body.contains("tool_call_id: pi-stable-190"));
+                assert!(
+                    body.contains(&format!("outcome: {outcome}")),
+                    "{agent}: {body}"
+                );
             }
-            let pre = HookEnvelope::from_query_and_body(
-                HookQuery {
-                    event: "pre-tool-use".into(),
-                    agent: Some("pi".into()),
-                    ..Default::default()
-                },
-                raw.clone(),
-            );
-            let post = HookEnvelope::from_query_and_body(
-                HookQuery {
-                    event: "post-tool-use".into(),
-                    agent: Some("pi".into()),
-                    ..Default::default()
-                },
-                raw,
-            );
-            assert!(
-                pre.body_excerpt
-                    .unwrap()
-                    .contains("tool_call_id: pi-stable-190")
-            );
-            let body = post.body_excerpt.unwrap();
-            assert!(body.contains("tool_call_id: pi-stable-190"));
-            assert!(body.contains(&format!("outcome: {outcome}")));
         }
+    }
+
+    #[test]
+    fn omp_tool_events_keep_family_call_id_and_output_but_not_arguments() {
+        // `build_pi_extension` in the CLI derives the Pi extension from the OMP
+        // one, so OMP posts this exact tool payload shape.
+        let pre = HookEnvelope::from_query_and_body(
+            HookQuery {
+                event: "pre-tool-use".into(),
+                agent: Some("omp".into()),
+                ..Default::default()
+            },
+            serde_json::json!({"tool":"bash","callID":"omp-1","args":{"command":"SENTINEL_COMMAND"}}),
+        );
+        assert_eq!(pre.title_hint.as_deref(), Some("tool non-file"));
+        assert_eq!(
+            pre.body_excerpt.as_deref(),
+            Some("tool_family: non-file\ntool_call_id: omp-1")
+        );
+
+        let post = HookEnvelope::from_query_and_body(
+            HookQuery {
+                event: "post-tool-use".into(),
+                agent: Some("omp".into()),
+                ..Default::default()
+            },
+            serde_json::json!({"tool":"bash","callID":"omp-1","args":{"command":"SENTINEL_COMMAND"},"output":"tests passed","details":{"diff":"SENTINEL_DETAILS"}}),
+        );
+        assert_eq!(post.title_hint.as_deref(), Some("tool non-file"));
+        assert_eq!(
+            post.body_excerpt.as_deref(),
+            Some("tool_family: non-file\ntool_call_id: omp-1\noutcome: unknown\n---\ntests passed")
+        );
     }
 }
