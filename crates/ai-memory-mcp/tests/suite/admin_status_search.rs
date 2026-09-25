@@ -251,7 +251,14 @@ async fn list_projects_returns_workspace_project_pairs() {
 async fn status_scoped_links_rejects_partial_scope() {
     let tmp = TempDir::new().unwrap();
     let (state, store) = make_admin_state(&tmp).await;
-    seed_linked_page(&store, "default", "app", "notes/one.md", &["notes/missing.md"]).await;
+    seed_linked_page(
+        &store,
+        "default",
+        "app",
+        "notes/one.md",
+        &["notes/missing.md"],
+    )
+    .await;
     let app = admin_router(state);
 
     for uri in [
@@ -311,7 +318,14 @@ async fn status_scoped_links_rejects_partial_scope() {
 async fn status_scoped_links_fails_closed_on_an_unknown_scope() {
     let tmp = TempDir::new().unwrap();
     let (state, store) = make_admin_state(&tmp).await;
-    seed_linked_page(&store, "default", "app", "notes/one.md", &["notes/missing.md"]).await;
+    seed_linked_page(
+        &store,
+        "default",
+        "app",
+        "notes/one.md",
+        &["notes/missing.md"],
+    )
+    .await;
     let app = admin_router(state);
 
     for uri in [
@@ -369,7 +383,14 @@ async fn status_scoped_links_fails_closed_on_an_unknown_scope() {
 async fn status_scoped_links_do_not_leak_across_workspaces() {
     let tmp = TempDir::new().unwrap();
     let (state, store) = make_admin_state(&tmp).await;
-    seed_linked_page(&store, "default", "app", "notes/one.md", &["notes/missing.md"]).await;
+    seed_linked_page(
+        &store,
+        "default",
+        "app",
+        "notes/one.md",
+        &["notes/missing.md"],
+    )
+    .await;
     seed_linked_page(&store, "other", "app", "notes/one.md", &[]).await;
     seed_linked_page(
         &store,
