@@ -70,6 +70,10 @@ struct Report {
     /// Derived-index diagnostics.
     #[serde(default)]
     derived: Derived,
+    /// Link counters for the scope named with `--workspace`/`--project`
+    /// (absent from servers that predate the scoped links line).
+    #[serde(default)]
+    links_scope: Option<ScopeLinks>,
     /// Physical storage figures (absent from pre-#549 servers).
     #[serde(default)]
     storage: Storage,
@@ -125,6 +129,17 @@ struct Derived {
     links_from_latest_pages: u64,
     unresolved_links_from_latest_pages: u64,
     stale_links_from_latest_pages: u64,
+}
+
+/// Mirror of the server's scoped link counters for the `links` line
+/// (`ai_memory_store::ScopeLinkStatus`).
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct ScopeLinks {
+    links_from_latest_pages: u64,
+    unresolved_links_from_latest_pages: u64,
+    stale_links_from_latest_pages: u64,
+    #[serde(default)]
+    typed_links_from_latest_pages: Vec<(String, u64)>,
 }
 
 /// Suggest compaction only above this share of the file. Below it the
@@ -229,7 +244,17 @@ pub async fn run(config: &Config, args: StatusArgs) -> Result<()> {
     // situation that prompts it.
     let spool = spool_health(&spool_dir(&config.data_dir));
 
-    let report: Report = match get_json::<Report>(&ep, "/admin/status", &[]).await {
+    // The `links` line can be scoped to one project: pass the names through
+    // and let `/admin/status` own the pair rule (400 when only one is given).
+    let mut query: Vec<(&str, &str)> = Vec::new();
+    if let Some(workspace) = args.workspace.as_deref() {
+        query.push(("workspace", workspace));
+    }
+    if let Some(project) = args.project.as_deref() {
+        query.push(("project", project));
+    }
+
+    let report: Report = match get_json::<Report>(&ep, "/admin/status", &query).await {
         Ok(report) => report,
         Err(err) => {
             report_offline_spool(&spool, args.json);
@@ -253,6 +278,7 @@ pub async fn run(config: &Config, args: StatusArgs) -> Result<()> {
                     "observations": report.counts.observations,
                 },
                 "derived": report.derived,
+                "links_scope": report.links_scope,
                 "storage": report.storage,
                 "providers": report.providers,
                 "spool": spool,
@@ -332,16 +358,32 @@ pub async fn run(config: &Config, args: StatusArgs) -> Result<()> {
                 );
             }
         }
+        // The scoped figures replace the store-wide ones when a scope was
+        // named, so the line never mixes one project's links with another's.
+        let (links, unresolved, stale, typed_links) = match &report.links_scope {
+            Some(scope) => (
+                scope.links_from_latest_pages,
+                scope.unresolved_links_from_latest_pages,
+                scope.stale_links_from_latest_pages,
+                &scope.typed_links_from_latest_pages,
+            ),
+            None => (
+                report.derived.links_from_latest_pages,
+                report.derived.unresolved_links_from_latest_pages,
+                report.derived.stale_links_from_latest_pages,
+                &report.derived.typed_links_from_latest_pages,
+            ),
+        };
+        let scope_label = match (report.links_scope.is_some(), &args.workspace, &args.project) {
+            (true, Some(workspace), Some(project)) => format!(" [{workspace}/{project}]"),
+            _ => String::new(),
+        };
         println!(
-            "  links:        {} latest-page links (unresolved: {}, stale: {})",
-            report.derived.links_from_latest_pages,
-            report.derived.unresolved_links_from_latest_pages,
-            report.derived.stale_links_from_latest_pages
+            "  links:        {links} latest-page links (unresolved: {unresolved}, stale: {stale})\
+             {scope_label}"
         );
-        if !report.derived.typed_links_from_latest_pages.is_empty() {
-            let typed: Vec<String> = report
-                .derived
-                .typed_links_from_latest_pages
+        if !typed_links.is_empty() {
+            let typed: Vec<String> = typed_links
                 .iter()
                 .map(|(k, v)| format!("{k}: {v}"))
                 .collect();

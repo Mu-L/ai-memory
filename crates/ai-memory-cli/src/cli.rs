@@ -1377,6 +1377,13 @@ pub struct StatusArgs {
     /// Emit the report as JSON instead of human-readable text.
     #[arg(long)]
     pub json: bool,
+    /// Workspace name. Together with `--project`, the `links` line reports
+    /// only that scope instead of the whole store.
+    #[arg(long)]
+    pub workspace: Option<String>,
+    /// Project name within the workspace (paired with `--workspace`).
+    #[arg(long)]
+    pub project: Option<String>,
 }
 
 /// Arguments for `backfill`.

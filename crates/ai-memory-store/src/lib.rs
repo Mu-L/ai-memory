@@ -71,9 +71,9 @@ pub use reader::{
     ObservationPageResult, ObservationRecord, OpenSession, PageAuthor, PageHit, PageHitWithMeta,
     PageLinks, PageMeta, PageSummary, ProjectSummary, RELATED_WALK_MAX_DEPTH,
     RELATED_WALK_MAX_NODES, ReaderPool, ReindexTargetStatus, RelatedNode, RelatedPage,
-    RrfContributions, ScopeRow, SearchExplain, SessionDependentRows, SessionEndDisposition,
-    SessionSummary, SettledPage, StatusCounts, StorageStatus, StoredEmbedding, StoredPageBody,
-    WorkspaceScopeRow, WorkspaceSummary, f32_vec_to_bytes,
+    RrfContributions, ScopeLinkStatus, ScopeRow, SearchExplain, SessionDependentRows,
+    SessionEndDisposition, SessionSummary, SettledPage, StatusCounts, StorageStatus,
+    StoredEmbedding, StoredPageBody, WorkspaceScopeRow, WorkspaceSummary, f32_vec_to_bytes,
 };
 pub use retrieval_tuning::{RetrievalTuning, is_session_recall_query};
 pub use scope::{
@@ -7826,6 +7826,75 @@ mod tests {
             vec![("fixes".to_string(), 1)],
             "{derived:?}"
         );
+    }
+
+    /// The scoped links line counts one project, not the whole store.
+    #[tokio::test]
+    async fn link_status_for_scope_counts_only_the_named_project() {
+        let tmp = TempDir::new().unwrap();
+        let store = Store::open(tmp.path()).unwrap();
+        let ws = store
+            .writer
+            .get_or_create_workspace("default")
+            .await
+            .unwrap();
+        let app = store
+            .writer
+            .get_or_create_project(ws, "app", None)
+            .await
+            .unwrap();
+        let infra = store
+            .writer
+            .get_or_create_project(ws, "infra", None)
+            .await
+            .unwrap();
+        let mut app_page = sample_page(ws, app, "notes/a.md", "body");
+        app_page.links = vec![
+            ai_memory_core::LinkTarget {
+                workspace: None,
+                project: None,
+                path: ai_memory_core::PagePath::new("notes/b.md").unwrap(),
+                relation: Some(ai_memory_core::Relation::Fixes),
+            },
+            ai_memory_core::LinkTarget {
+                workspace: None,
+                project: None,
+                path: ai_memory_core::PagePath::new("notes/missing.md").unwrap(),
+                relation: None,
+            },
+        ];
+        store.writer.upsert_page(app_page).await.unwrap();
+        // The target page exists by the time the counts are read, so the
+        // `fixes` edge resolves and only the missing target stays
+        // unresolved (a new page repoints incoming links:
+        // `refresh_incoming_links_for_path`).
+        store
+            .writer
+            .upsert_page(sample_page(ws, app, "notes/b.md", "target body"))
+            .await
+            .unwrap();
+        let mut infra_page = sample_page(ws, infra, "notes/c.md", "body");
+        infra_page.links = vec![ai_memory_core::LinkTarget {
+            workspace: None,
+            project: None,
+            path: ai_memory_core::PagePath::new("notes/missing.md").unwrap(),
+            relation: None,
+        }];
+        store.writer.upsert_page(infra_page).await.unwrap();
+
+        let scoped = store.reader.link_status_for_scope(ws, app).await.unwrap();
+        assert_eq!(scoped.links_from_latest_pages, 2);
+        assert_eq!(scoped.unresolved_links_from_latest_pages, 1);
+        assert_eq!(scoped.stale_links_from_latest_pages, 0);
+        assert_eq!(
+            scoped.typed_links_from_latest_pages,
+            vec![("fixes".to_string(), 1)]
+        );
+
+        // Store-wide, both projects are counted — the whole point of the
+        // scoped call.
+        let global = store.reader.derived_index_status().await.unwrap();
+        assert_eq!(global.links_from_latest_pages, 3);
     }
 
     #[tokio::test]

@@ -227,6 +227,26 @@ pub async fn run_lint(
         });
     }
 
+    // Dangling same-project links: a plain body link or wikilink that never
+    // resolved. Lower signal than a broken cross-project dependency, but the
+    // status counter alone never names the page or the missing target.
+    for dangling in reader
+        .dangling_internal_links(workspace_id, project_id)
+        .await?
+    {
+        findings.push(LintFinding {
+            kind: "broken_link".into(),
+            severity: "warning".into(),
+            message: format!(
+                "Page {} links to {} but that page does not exist in this project \
+                 (missing, renamed, or deleted) — a broken internal link",
+                dangling.from_path, dangling.path,
+            ),
+            pages: vec![dangling.from_path],
+            detail: None,
+        });
+    }
+
     // Declared contradictions (typed `contradicts` edges, 2.0 item 3):
     // an author or the consolidator explicitly said two pages disagree —
     // the highest-signal zero-LLM contradiction finding possible.

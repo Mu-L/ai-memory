@@ -1103,6 +1103,23 @@ impl ReindexTargetStatus {
     }
 }
 
+/// Link counters for one project — the scoped counterpart of
+/// [`DerivedIndexStatus`]'s four link figures. `GET /admin/status` carries
+/// them when the caller names a scope, so `ai-memory status
+/// --workspace/--project` can show a project's own link health instead of
+/// the store-wide aggregate.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct ScopeLinkStatus {
+    /// Outgoing links whose source page is latest.
+    pub links_from_latest_pages: u64,
+    /// Latest-page outgoing links whose target path has not resolved yet.
+    pub unresolved_links_from_latest_pages: u64,
+    /// Latest-page outgoing links pointing at a non-latest target row.
+    pub stale_links_from_latest_pages: u64,
+    /// Typed relation edges (`link_type != 'references'`) by relation.
+    pub typed_links_from_latest_pages: Vec<(String, u64)>,
+}
+
 /// Derived-index health counters surfaced by admin status.
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct DerivedIndexStatus {
@@ -1515,6 +1532,17 @@ pub struct DanglingCrossLink {
     /// likely a typo / wrong name; `true` → the page is missing or was
     /// renamed/deleted in an existing project (a broken dependency).
     pub project_exists: bool,
+}
+
+/// An unresolved same-project link — a latest page's own `to_page_id IS
+/// NULL` edge with no cross-project scope. Surfaced by `memory_lint` as a
+/// broken internal link.
+#[derive(Debug, Clone, Serialize)]
+pub struct DanglingInternalLink {
+    /// Path of the page that authored the link (in the queried project).
+    pub from_path: String,
+    /// Target page path as declared; unresolved, so nothing lives there.
+    pub path: String,
 }
 
 /// A page related to another through the link graph — used by the
@@ -7103,6 +7131,46 @@ impl ReaderPool {
         .await
     }
 
+    /// Unresolved same-project links: every latest page in the queried
+    /// project whose bare (no cross-project scope) target is still
+    /// `to_page_id = NULL`. `memory_lint` reports each as a `broken_link`
+    /// finding — the raw counter in `ai-memory status` never names the page
+    /// or the missing target.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn dangling_internal_links(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+    ) -> StoreResult<Vec<DanglingInternalLink>> {
+        self.with_conn(move |conn| {
+            let mut stmt = conn.prepare(
+                "SELECT fp.path, l.to_path \
+                 FROM links l \
+                 JOIN pages fp ON fp.id = l.from_page_id \
+                     AND fp.workspace_id = ?1 AND fp.project_id = ?2 AND fp.is_latest = 1 \
+                 WHERE l.to_page_id IS NULL AND l.to_project IS NULL \
+                 ORDER BY fp.path, l.to_path",
+            )?;
+            let rows = stmt.query_map(
+                params![workspace_id.as_bytes(), project_id.as_bytes()],
+                |row| {
+                    Ok(DanglingInternalLink {
+                        from_path: row.get(0)?,
+                        path: row.get(1)?,
+                    })
+                },
+            )?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            Ok(out)
+        })
+        .await
+    }
+
     /// Cross-session pass cadence probe: completed sessions newer than
     /// the pass's last run for this scope (docs/experience.md).
     ///
@@ -8695,6 +8763,75 @@ impl ReaderPool {
                      WHERE fp.is_latest = 1 \
                        AND l.to_page_id IS NOT NULL \
                        AND COALESCE(tp.is_latest, 0) != 1",
+                )?,
+            })
+        })
+        .await
+    }
+
+    /// Link counters scoped to one project — the four figures
+    /// [`Self::derived_index_status`] reports store-wide, restricted to the
+    /// latest pages of the queried scope. `GET /admin/status` carries them
+    /// when the caller names a scope, so `ai-memory status
+    /// --workspace/--project` can show a project's own link health instead
+    /// of an aggregate that mixes every scope in the store.
+    ///
+    /// # Errors
+    /// Propagates any SQL or pool error.
+    pub async fn link_status_for_scope(
+        &self,
+        workspace_id: WorkspaceId,
+        project_id: ProjectId,
+    ) -> StoreResult<ScopeLinkStatus> {
+        self.with_conn(move |conn| {
+            let typed_links_from_latest_pages = {
+                let mut stmt = conn.prepare(
+                    "SELECT l.link_type, COUNT(*) FROM links l \
+                     JOIN pages fp ON fp.id = l.from_page_id \
+                     WHERE fp.is_latest = 1 \
+                       AND fp.workspace_id = ?1 AND fp.project_id = ?2 \
+                       AND l.link_type != 'references' \
+                     GROUP BY l.link_type ORDER BY l.link_type",
+                )?;
+                let rows: Vec<(String, i64)> = stmt
+                    .query_map(
+                        params![workspace_id.as_bytes(), project_id.as_bytes()],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )?
+                    .collect::<Result<_, _>>()?;
+                rows.into_iter()
+                    .map(|(k, v)| (k, u64::try_from(v).unwrap_or(0)))
+                    .collect()
+            };
+            Ok(ScopeLinkStatus {
+                typed_links_from_latest_pages,
+                links_from_latest_pages: count_bound(
+                    conn,
+                    "SELECT COUNT(*) FROM links l \
+                     JOIN pages fp ON fp.id = l.from_page_id \
+                     WHERE fp.is_latest = 1 \
+                       AND fp.workspace_id = ?1 AND fp.project_id = ?2",
+                    &[workspace_id.as_bytes(), project_id.as_bytes()],
+                )?,
+                unresolved_links_from_latest_pages: count_bound(
+                    conn,
+                    "SELECT COUNT(*) FROM links l \
+                     JOIN pages fp ON fp.id = l.from_page_id \
+                     WHERE fp.is_latest = 1 \
+                       AND fp.workspace_id = ?1 AND fp.project_id = ?2 \
+                       AND l.to_page_id IS NULL",
+                    &[workspace_id.as_bytes(), project_id.as_bytes()],
+                )?,
+                stale_links_from_latest_pages: count_bound(
+                    conn,
+                    "SELECT COUNT(*) FROM links l \
+                     JOIN pages fp ON fp.id = l.from_page_id \
+                     LEFT JOIN pages tp ON tp.id = l.to_page_id \
+                     WHERE fp.is_latest = 1 \
+                       AND fp.workspace_id = ?1 AND fp.project_id = ?2 \
+                       AND l.to_page_id IS NOT NULL \
+                       AND COALESCE(tp.is_latest, 0) != 1",
+                    &[workspace_id.as_bytes(), project_id.as_bytes()],
                 )?,
             })
         })
