@@ -45,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pinned`, `expires_at` and `entities` (a pinned page became decay-eligible),
   the title came from the filename, and the one-shot OKF file pass wrote a
   second frontmatter block above the authored one. The parser now accepts
-  `---\r\n` fences and leaves the body's line endings untouched. (#NNN)
+  `---\r\n` fences and leaves the body's line endings untouched. (#908)
 - A manual `memory_consolidate` now reconciles the session's durable
   consolidation job row. The MCP handler wrote the page directly through the
   consolidator without touching `session_consolidation_jobs`, so a session
