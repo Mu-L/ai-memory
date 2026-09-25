@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   feedback-loop guard stays non-overridable. (#894)
 
 ### Fixed
+- The default log filter's `rmcp=warn` cap (#894) no longer raises rmcp
+  above a quieter `log_level`. A target directive beats the global level
+  either way, so with `log_level = "error"` or `"off"` the cap re-enabled the
+  SDK's warnings the operator had silenced; it now only applies when
+  `log_level` is louder than `warn`. (#896)
 - A manual `memory_consolidate` now reconciles the session's durable
   consolidation job row. The MCP handler wrote the page directly through the
   consolidator without touching `session_consolidation_jobs`, so a session
