@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `400`, an unknown scope the usual `404`. Without the pair the response and
   the human output are byte-identical to before, so the endpoint stays a plain
   health probe. (#911)
+- `ai-memory status` (text and `--json`) and `GET /admin/status` report the
+  server's HTTP exposure, so an unauthenticated bind is pollable by a monitor.
+  The verdict is admin-gated at parity with the existing `bind`/`data_dir`
+  fields and defaults to `Unknown` (never `Safe`) when unset or read by an
+  older client. (#904)
 
 ### Changed
 - Quieted the default server log: the reconciliation-pass summary that fired
@@ -43,8 +48,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server's log). Both are restorable through `log_level` (e.g.
   `"info,rmcp=info"` or `"debug"`) or `RUST_LOG`; the `tracing_appender=warn`
   feedback-loop guard stays non-overridable. (#894)
+- An unauthenticated non-loopback bind is now announced on stderr at startup
+  independent of the log filter (a direct `eprintln!`, not a filterable
+  `tracing` warning), so `RUST_LOG=error` or a container's quiet log no longer
+  hides it. The refuse path for a non-loopback unauthenticated host bind is
+  unchanged — this only makes the existing warning reliably visible. (#903)
 
 ### Fixed
+- The default log filter's `rmcp=warn` cap (#894) no longer raises rmcp
+  above a quieter `log_level`. A target directive beats the global level
+  either way, so with `log_level = "error"` or `"off"` the cap re-enabled the
+  SDK's warnings the operator had silenced; it now only applies when
+  `log_level` is louder than `warn`. (#896)
+- A session with no usable prompt is titled `Session <id>` rather than
+  `stop` or `session-end`. Once #895 skipped tool-family labels in the title
+  fallback, the next candidate in a real session was the kind name the router
+  stores for an untitled lifecycle event. (#897)
+- A wiki page with CRLF line endings is parsed as having frontmatter again.
+  `markdown::parse` only matched the fence lines with a bare `\n`, so a page
+  a Windows editor saved, or one `core.autocrlf=true` checked out, was treated
+  as body-only: `reindex`/the watcher indexed it without its `tier`,
+  `pinned`, `expires_at` and `entities` (a pinned page became decay-eligible),
+  the title came from the filename, and the one-shot OKF file pass wrote a
+  second frontmatter block above the authored one. The parser now accepts
+  `---\r\n` fences and leaves the body's line endings untouched. (#908)
+- Rule slugs that hit the 60-character cap keep every whole word that fits.
+  The word-boundary cut from #886 only looked for a hyphen before position 60,
+  so a slug whose first 60 characters ended exactly on a word dropped that
+  word, and a hyphen early in the title (a short first word before one long
+  token) collapsed the slug to that single word. The cut now counts a hyphen
+  at position 60 and ignores one in the first half, falling back to the hard
+  cut at 60. (#886, #910)
+- On Windows, `ai-memory run` recognises an OpenCode session as belonging
+  to the current checkout again. `native_session_in_checkout` (#880) compared
+  the stored `directory` with the backslash `cwd` exactly, while OpenCode
+  stores forward slashes (#891), so the check never matched there; it now uses
+  the same two spellings as the other OpenCode lookups (#882). (#906)
 - A manual `memory_consolidate` now reconciles the session's durable
   consolidation job row. The MCP handler wrote the page directly through the
   consolidator without touching `session_consolidation_jobs`, so a session

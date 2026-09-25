@@ -609,6 +609,48 @@ fn validate_http_exposure(
     );
 }
 
+/// The operator-facing banner for an exposure that is not [`HttpExposure::Safe`].
+///
+/// Returned as text rather than printed so a test can assert it, and printed at
+/// the call site with `eprintln!` rather than only `tracing::warn!`: the tracing
+/// stderr layer sits behind `EnvFilter`, so `RUST_LOG=error` — or
+/// `log_level = "error"` in the config, which feeds the same filter — silences a
+/// warning whose whole job is to say the server is reachable from the network
+/// without a credential. A security notice a log level can switch off is not a
+/// notice. The structured `tracing::warn!` stays for log collectors.
+fn exposure_banner(exposure: HttpExposure, local_addr: SocketAddr) -> Option<String> {
+    match exposure {
+        HttpExposure::Safe => None,
+        HttpExposure::InsecureByOverride => Some(format!(
+            "WARNING: ai-memory is listening on {local_addr} with NO AUTHENTICATION because \
+             --allow-insecure-no-auth was supplied. Anyone who can reach this address can call \
+             destructive MCP tools."
+        )),
+        HttpExposure::UndeterminedInContainer => Some(format!(
+            "WARNING: ai-memory is listening on {local_addr} with NO AUTHENTICATION. Inside a \
+             container the bind address cannot show whether this port reaches the network - the \
+             host publish spec decides. Published with `-p 127.0.0.1:49374:49374` you are fine; \
+             published on 0.0.0.0 or a LAN address, anyone on the network can call destructive \
+             MCP tools. Run `ai-memory generate-auth-token` and set AI_MEMORY_AUTH_TOKEN."
+        )),
+    }
+}
+
+/// The `/admin/status` view of an exposure verdict.
+///
+/// Separate from [`exposure_banner`] because the two answer different
+/// questions: the banner is read once at startup, this is polled afterwards.
+/// They must not be able to disagree, so both derive from the same
+/// [`HttpExposure`] and a test pins that.
+fn exposure_report(exposure: HttpExposure) -> ai_memory_mcp::admin::HttpExposureReport {
+    use ai_memory_mcp::admin::HttpExposureReport as Report;
+    match exposure {
+        HttpExposure::Safe => Report::Safe,
+        HttpExposure::InsecureByOverride => Report::UnauthenticatedByOverride,
+        HttpExposure::UndeterminedInContainer => Report::UnauthenticatedInContainer,
+    }
+}
+
 /// Validate the trusted proxy's least-privilege credential and optional stable
 /// root identity before binding the server.
 fn validate_trusted_proxy_auth(auth: &AuthSettings) -> Result<()> {
@@ -1310,6 +1352,11 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 sanitizer: sanitizer.clone(),
                 data_dir: config.data_dir.clone(),
             });
+            // Shared with the post-bind exposure record below: the verdict needs
+            // the bound address, which is not known until the listener exists.
+            let http_exposure_cell: std::sync::Arc<
+                std::sync::OnceLock<ai_memory_mcp::admin::HttpExposureReport>,
+            > = std::sync::Arc::new(std::sync::OnceLock::new());
             let admin = admin_router_with_sweep_tuning(
                 AdminState {
                     ingest_metrics: ingest_metrics.clone(),
@@ -1327,6 +1374,7 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                     data_dir: config.data_dir.clone(),
                     db_path: store.db_path().to_path_buf(),
                     bind: bind.clone(),
+                    http_exposure: http_exposure_cell.clone(),
                     home_dir: config.home_dir.clone(),
                     bootstrap_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
                     token_pepper: config
@@ -1530,6 +1578,14 @@ pub async fn run(config: &Config, args: ServeArgs) -> Result<()> {
                 body_limit_mb = MAX_BODY_BYTES / 1024 / 1024,
                 "MCP HTTP server ready (POST /mcp, POST /hook, Ctrl-C to stop)",
             );
+            // Record the verdict for `/admin/status` before announcing it, so a
+            // poller and the startup banner cannot disagree (#902).
+            let _ = http_exposure_cell.set(exposure_report(exposure));
+            // Unconditional: see `exposure_banner` for why this does not ride
+            // on the tracing filter.
+            if let Some(banner) = exposure_banner(exposure, local_addr) {
+                eprintln!("{banner}");
+            }
             if exposure == HttpExposure::InsecureByOverride {
                 tracing::warn!(
                     %local_addr,
@@ -3002,6 +3058,81 @@ mod tests {
         assert_eq!(
             validate_http_exposure(loopback, true, true, false, false, false).unwrap(),
             HttpExposure::Safe
+        );
+    }
+
+    /// The exposure notice must not be something a log level can switch off.
+    /// `exposure_banner` is printed with `eprintln!`, outside the tracing
+    /// `EnvFilter`, so `RUST_LOG=error` or `log_level = "error"` cannot hide
+    /// that the server is reachable without a credential.
+    #[test]
+    fn every_unsafe_exposure_produces_an_operator_banner() {
+        let addr: SocketAddr = "0.0.0.0:49374".parse().expect("valid test address");
+
+        assert_eq!(exposure_banner(HttpExposure::Safe, addr), None);
+
+        let override_banner = exposure_banner(HttpExposure::InsecureByOverride, addr)
+            .expect("an unauthenticated override must be announced");
+        assert!(override_banner.contains("NO AUTHENTICATION"));
+        assert!(override_banner.contains("0.0.0.0:49374"));
+        assert!(override_banner.contains("--allow-insecure-no-auth"));
+
+        let container_banner = exposure_banner(HttpExposure::UndeterminedInContainer, addr)
+            .expect("an unauthenticated container bind must be announced");
+        assert!(container_banner.contains("NO AUTHENTICATION"));
+        assert!(container_banner.contains("0.0.0.0:49374"));
+        // The remedy has to be in the text: the operator reading this on a
+        // terminal has no log collector to go digging in.
+        assert!(container_banner.contains("AI_MEMORY_AUTH_TOKEN"));
+    }
+
+    /// The Quick Start shape from #407 is exactly the one #902 reports as
+    /// silently exposed, so the two must agree: still not refused, but now
+    /// unconditionally announced.
+    #[test]
+    fn the_quick_start_container_bind_is_announced_not_refused() {
+        let quick_start: SocketAddr = "0.0.0.0:49374".parse().expect("valid test address");
+
+        let exposure = validate_http_exposure(quick_start, false, false, false, false, true)
+            .expect("must not refuse");
+        assert_eq!(exposure, HttpExposure::UndeterminedInContainer);
+        assert!(exposure_banner(exposure, quick_start).is_some());
+
+        // With a token configured there is nothing to announce.
+        let authed = validate_http_exposure(quick_start, true, false, false, false, true)
+            .expect("auth is fine");
+        assert_eq!(exposure_banner(authed, quick_start), None);
+    }
+
+    /// The polled verdict and the startup banner must not be able to disagree:
+    /// an operator seeing `safe` in `ai-memory status` while the banner said
+    /// otherwise would trust the wrong one.
+    #[test]
+    fn the_status_report_agrees_with_the_startup_banner() {
+        use ai_memory_mcp::admin::HttpExposureReport as Report;
+        let addr: SocketAddr = "0.0.0.0:49374".parse().expect("valid test address");
+
+        for exposure in [
+            HttpExposure::Safe,
+            HttpExposure::InsecureByOverride,
+            HttpExposure::UndeterminedInContainer,
+        ] {
+            let reported = exposure_report(exposure);
+            let banner = exposure_banner(exposure, addr);
+            assert_eq!(
+                reported == Report::Safe,
+                banner.is_none(),
+                "{exposure:?} reported {reported:?} but banner was {banner:?}"
+            );
+        }
+
+        assert_eq!(
+            exposure_report(HttpExposure::InsecureByOverride),
+            Report::UnauthenticatedByOverride
+        );
+        assert_eq!(
+            exposure_report(HttpExposure::UndeterminedInContainer),
+            Report::UnauthenticatedInContainer
         );
     }
 

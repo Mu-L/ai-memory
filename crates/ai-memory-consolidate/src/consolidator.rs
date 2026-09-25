@@ -1544,7 +1544,11 @@ fn slugify_for_rule(title: &str) -> String {
         // `out` is ASCII here, so byte index 60 is a char boundary. Cut at
         // the last hyphen inside the window to end on a whole word; only
         // hard-cut at 60 when the window holds no hyphen (one long token).
-        match out[..60].rfind('-') {
+        // The window includes index 60: a hyphen there means the first 60
+        // chars are whole words, and they all fit. A hyphen in the first
+        // half does not count, because cutting there would throw most of
+        // the title away (a short first word before one long token).
+        match out[..=60].rfind('-').filter(|&idx| idx >= 30) {
             Some(idx) => out.truncate(idx),
             None => out.truncate(60),
         }
@@ -1959,6 +1963,27 @@ mod tests {
     #[test]
     fn slugify_cjk_still_falls_back() {
         assert_eq!(slugify_for_rule("中文标题"), "rule");
+    }
+
+    /// A slug whose first 60 chars already end on a whole word keeps that
+    /// word: the hyphen right after it (index 60) is the boundary, and a
+    /// window that stops before it dropped the word (follow-up to #886).
+    #[test]
+    fn slugify_keeps_a_word_that_ends_exactly_at_the_cap() {
+        let title = ["abcd"; 11].join(" ") + " abcde more";
+        let slug = slugify_for_rule(&title);
+        assert_eq!(slug, ["abcd"; 11].join("-") + "-abcde");
+        assert_eq!(slug.len(), 60);
+    }
+
+    /// A boundary in the first half would throw most of the title away: a
+    /// short word before one long token must not collapse the slug to that
+    /// word, so the cut falls back to the hard 60 (follow-up to #886).
+    #[test]
+    fn slugify_does_not_collapse_to_a_short_first_word() {
+        let slug = slugify_for_rule(&format!("a {}", "b".repeat(70)));
+        assert_eq!(slug.len(), 60);
+        assert!(slug.starts_with("a-bbb"), "slug collapsed to {slug:?}");
     }
 
     fn update_with_summary(summary: Option<&str>) -> crate::types::ConsolidatedPageUpdate {
