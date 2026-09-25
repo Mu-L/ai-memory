@@ -26,7 +26,8 @@ pub struct Markdown {
 /// Parse markdown text into [`Markdown`].
 ///
 /// Recognises only the canonical `---\n<yaml>\n---\n` block at the very
-/// start of the document. Anything else is treated as body.
+/// start of the document, with either LF or CRLF line endings on the fence
+/// lines. Anything else is treated as body.
 ///
 /// A leading UTF-8 BOM is dropped either way. It only means "this file is
 /// UTF-8" while it sits at offset zero; carried into `body` it is a
@@ -34,16 +35,28 @@ pub struct Markdown {
 /// from [`derive_title`] and rides into the body a later re-emit writes
 /// back after the frontmatter fence.
 ///
+/// CRLF is what a Windows editor saves, and what `core.autocrlf=true` checks
+/// out for every page of a wiki cloned onto Windows. Missing the fence there
+/// treats the block as body: the page reindexes with no tier, pin or TTL, and
+/// the in-place OKF file pass writes a second frontmatter block above it. The
+/// body keeps its line endings untouched either way.
+///
 /// # Errors
 /// Returns [`WikiError::Yaml`] if the frontmatter block exists but does
 /// not parse as YAML.
 pub fn parse(input: &str) -> WikiResult<Markdown> {
     let trimmed = input.strip_prefix('\u{FEFF}').unwrap_or(input);
-    if let Some(rest) = trimmed.strip_prefix("---\n")
-        && let Some(end) = rest.find("\n---\n")
+    let (rest, newline) = if let Some(rest) = trimmed.strip_prefix("---\r\n") {
+        (Some(rest), "\r\n")
+    } else {
+        (trimmed.strip_prefix("---\n"), "\n")
+    };
+    let close = format!("\n---{newline}");
+    if let Some(rest) = rest
+        && let Some(end) = rest.find(&close)
     {
-        let fm_str = &rest[..end];
-        let body = rest[end + 5..].to_string();
+        let fm_str = rest[..end].trim_end_matches('\r');
+        let body = rest[end + close.len()..].to_string();
         let fm_yaml: serde_yaml::Value = serde_yaml::from_str(fm_str)?;
         let fm_json: serde_json::Value = serde_json::to_value(fm_yaml)?;
         return Ok(Markdown {
@@ -555,6 +568,22 @@ mod tests {
         let md = parse(src).unwrap();
         assert_eq!(md.frontmatter["title"], "Hello");
         assert_eq!(md.body, "Body\n");
+    }
+
+    /// A page saved with CRLF line endings (a Windows editor, or a wiki
+    /// checked out with `core.autocrlf=true`): the fence lines end in
+    /// `\r\n`, but they are still the canonical frontmatter block. Treating
+    /// the file as body-only drops `pinned`/`tier`/`expires_at` on reindex
+    /// and lets the OKF file pass write a second frontmatter block above
+    /// the first.
+    #[test]
+    fn parses_crlf_frontmatter() {
+        let src = "---\r\ntitle: Hello\r\npinned: true\r\ntags:\r\n  - a\r\n---\r\nBody\r\n";
+        let md = parse(src).unwrap();
+        assert_eq!(md.frontmatter["title"], "Hello");
+        assert_eq!(md.frontmatter["pinned"], true);
+        assert_eq!(md.frontmatter["tags"][0], "a");
+        assert_eq!(md.body, "Body\r\n");
     }
 
     /// A page a Windows editor saved with a UTF-8 BOM and no frontmatter:

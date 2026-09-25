@@ -3464,6 +3464,36 @@ mod tests {
         );
     }
 
+    /// The same page saved with CRLF line endings (a Windows editor, or a
+    /// wiki checked out with `core.autocrlf=true`) must index the same way:
+    /// its frontmatter is still the source of truth for tier/pinned/title,
+    /// not body text ahead of the H1.
+    #[tokio::test]
+    async fn reindex_page_reads_crlf_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let (store, wiki, ws, proj) = scoped(&tmp).await;
+
+        let path = PagePath::new("sessions/crlf.md").unwrap();
+        let abs = wiki.abs_path(ws, proj, &path);
+        std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+        std::fs::write(
+            &abs,
+            "---\r\ntitle: S\r\ntier: episodic\r\npinned: true\r\n---\r\nbody\r\n",
+        )
+        .unwrap();
+
+        wiki.reindex_page(ws, proj, path.clone()).await.unwrap();
+        let meta = store
+            .reader
+            .page_meta("default", "scratch", path.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(meta.title, "S", "the frontmatter title must win");
+        assert_eq!(meta.tier, "episodic");
+        assert!(meta.pinned, "a CRLF `pinned: true` must still pin the page");
+    }
+
     #[tokio::test]
     async fn write_paths_persist_index_metadata_for_reindex_round_trip() {
         let tmp = TempDir::new().unwrap();
