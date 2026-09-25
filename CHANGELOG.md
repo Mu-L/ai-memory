@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   either way, so with `log_level = "error"` or `"off"` the cap re-enabled the
   SDK's warnings the operator had silenced; it now only applies when
   `log_level` is louder than `warn`. (#896)
+- A session with no usable prompt is titled `Session <id>` rather than
+  `stop` or `session-end`. Once #895 skipped tool-family labels in the title
+  fallback, the next candidate in a real session was the kind name the router
+  stores for an untitled lifecycle event. (#897)
 - A manual `memory_consolidate` now reconciles the session's durable
   consolidation job row. The MCP handler wrote the page directly through the
   consolidator without touching `session_consolidation_jobs`, so a session
