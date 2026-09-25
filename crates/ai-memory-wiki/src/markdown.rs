@@ -177,6 +177,18 @@ fn log_bounded(value: &str) -> String {
     ai_memory_core::truncate_utf8_bytes(value, RELATION_LOG_FIELD_MAX_BYTES)
 }
 
+/// Whether a link target's final path segment can name a page.
+///
+/// A directory target (trailing `/`, so an empty last segment) and a
+/// stem-less `.md` cannot: the first used to normalize to the literal
+/// `notes/.md` in `relations:` frontmatter, the second to an
+/// extension-less path — both permanently unresolved `links` rows that no
+/// page write could ever repoint.
+fn last_segment_names_a_page(target: &str) -> bool {
+    let last = target.rsplit_once('/').map_or(target, |(_, s)| s);
+    !last.is_empty() && last != ".md"
+}
+
 /// Extract typed relation edges from a page's `relations:` frontmatter
 /// (2.0 item 3):
 ///
@@ -212,17 +224,18 @@ pub fn extract_relation_links(frontmatter: &serde_json::Value) -> Vec<LinkTarget
                 },
             };
             // Same terminal normalization as wikilinks: extension-less
-            // targets gain `.md`; anything with a non-md extension is
-            // not a page and is skipped.
+            // targets gain `.md`; a directory target, a stem-less `.md`, and
+            // anything with a non-md extension are not pages and are skipped.
             let raw_path = raw_path.trim();
             let last = raw_path.rsplit_once('/').map_or(raw_path, |(_, s)| s);
+            let names_a_page = last_segment_names_a_page(raw_path)
+                && (!last.contains('.') || raw_path.ends_with(".md"));
+            if !names_a_page {
+                tracing::warn!(target = %log_bounded(target), "relation target is not a page; skipping");
+                continue;
+            }
             let normalized = if last.contains('.') {
-                if raw_path.ends_with(".md") {
-                    raw_path.to_string()
-                } else {
-                    tracing::warn!(target = %log_bounded(target), "relation target is not a page; skipping");
-                    continue;
-                }
+                raw_path.to_string()
             } else {
                 format!("{raw_path}.md")
             };
@@ -355,13 +368,20 @@ fn normalize_link_target(raw: &str, page_path: &PagePath, wikilink: bool) -> Opt
         return None;
     }
 
+    // A directory target (`notes/`) is not a page: kept, it minted an
+    // extension-less `to_path` (or, for a wikilink, the literal
+    // `notes/.md`) that no page write could ever resolve.
+    if !last_segment_names_a_page(target) {
+        return None;
+    }
+
     let mut target = target.to_string();
     let last_segment = target.rsplit_once('/').map_or(target.as_str(), |(_, s)| s);
     if last_segment.contains('.') {
         if !target.ends_with(".md") {
             return None;
         }
-    } else if wikilink || !last_segment.is_empty() {
+    } else {
         target.push_str(".md");
     }
 
@@ -481,6 +501,21 @@ mod tests {
         let links = extract_relation_links(&fm);
         assert_eq!(links.len(), 1, "{links:?}");
         assert_eq!(links[0].path.as_str(), "notes/ok.md");
+    }
+
+    #[test]
+    fn directory_and_stemless_targets_are_not_pages() {
+        // `sessions/` used to normalize to the literal `sessions/.md` — a
+        // link no page write could ever resolve; the same trailing-slash
+        // form in the body stayed extension-less, which cannot match a page
+        // path either. Both are dropped now.
+        let fm = serde_json::json!({
+            "relations": {"fixes": ["sessions/", "sessions/.md"]}
+        });
+        assert!(extract_relation_links(&fm).is_empty());
+
+        assert!(extract_links("- [notes/](notes/)\n", &page()).is_empty());
+        assert!(extract_links("- [[notes/]]\n", &page()).is_empty());
     }
 
     #[test]

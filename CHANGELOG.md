@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mean latency instead of 20.2 s — in that run the hosted mean sat on the
   server's 20 s completion timeout, which made the reranker stall every
   query before falling back. (#873)
+- `ai-memory status --workspace <name> --project <name>` scopes the `links`
+  line, and its `typed edges` detail, to one project instead of the whole
+  store. `GET /admin/status` accepts the same optional pair and answers with a
+  new `links_scope` object (`ScopeLinkStatus`); naming only one of the two is
+  a `400`, an unknown scope the usual `404`. Without the pair the response and
+  the human output are byte-identical to before, so the endpoint stays a plain
+  health probe. (#911)
 
 ### Changed
 - Quieted the default server log: the reconciliation-pass summary that fired
@@ -247,6 +254,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of `%C3%A9`. An accented cwd reached the server as a different
   path, and Cursor events and the session-start handoff lookup both use the
   query `cwd`. (#877)
+- Link extraction no longer mints a permanently unresolved row from a
+  directory target. A `relations:` value whose final component is empty
+  (`sessions/`) had the extension appended to nothing and was stored as the
+  literal `sessions/.md`; the same target in a body link or wikilink
+  (`[notes/](notes/)`) stayed extension-less. No page path can match either —
+  page paths carry `.md` and `latest_page_id_for_link` matches exactly — so
+  both sat in `links` with `to_page_id = NULL` and were visible only as
+  `unresolved:` in `ai-memory status`. Both routes now skip a directory
+  target, or a stem-less `.md`, with the existing warning. Unresolved
+  same-project links are reported by `memory_lint` now too: it only knew
+  cross-project dangling edges, so a broken internal link stayed invisible
+  outside the counter. (#911)
 
 ## [2.4.0] - 2026-09-21
 
