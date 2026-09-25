@@ -296,6 +296,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of `%C3%A9`. An accented cwd reached the server as a different
   path, and Cursor events and the session-start handoff lookup both use the
   query `cwd`. (#877)
+- Link extraction no longer mints a permanently unresolved row from a
+  directory target. A `relations:` value whose final component is empty
+  (`sessions/`) had the extension appended to nothing and was stored as the
+  literal `sessions/.md`; the same target in a body link or wikilink
+  (`[notes/](notes/)`) stayed extension-less. No page path can match either —
+  page paths carry `.md` and `latest_page_id_for_link` matches exactly — so
+  both sat in `links` with `to_page_id = NULL` and were visible only as
+  `unresolved:` in `ai-memory status`. Both routes now skip a directory
+  target, or a stem-less `.md`, with the existing warning. (#915)
 
 ## [2.4.0] - 2026-09-21
 
