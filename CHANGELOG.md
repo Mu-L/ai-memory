@@ -7,22 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `docs/jev-reranker-adapter.md` documents a stdlib-only adapter
-  (`docs/examples/jev-reranker-adapter/jev_rerank_shim.py`) that serves the
-  `AI_MEMORY_RERANKER=llm` request leg from a Jev `/v1/systemone` judge
-  endpoint while reverse-proxying consolidation/lint/bootstrap traffic to
-  the configured provider unchanged. In the contributor's own 102-query
-  golden-set benchmark the judge matched the hosted reranker's
-  hit@1/MRR/NDCG@10 (0.778/0.838/0.873 vs 0.778/0.840/0.875) at 0.205 s
-  mean latency instead of 20.2 s — in that run the hosted mean sat on the
-  server's 20 s completion timeout, which made the reranker stall every
-  query before falling back. (#873)
-- `ai-memory status` (text and `--json`) and `GET /admin/status` report the
-  server's HTTP exposure, so an unauthenticated bind is pollable by a monitor.
-  The verdict is admin-gated at parity with the existing `bind`/`data_dir`
-  fields and defaults to `Unknown` (never `Safe`) when unset or read by an
-  older client. (#904)
+## [2.4.1] - 2026-09-25
 
 ### Changed
 - Quieted the default server log: the reconciliation-pass summary that fired
@@ -6560,7 +6545,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Consolidator used server startup default project instead of the
   session's actual project.
 
-[Unreleased]: https://github.com/akitaonrails/ai-memory/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/akitaonrails/ai-memory/compare/v2.4.1...HEAD
+[2.4.1]: https://github.com/akitaonrails/ai-memory/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/akitaonrails/ai-memory/releases/tag/v2.4.0
 [2.3.2]: https://github.com/akitaonrails/ai-memory/releases/tag/v2.3.2
 [2.3.1]: https://github.com/akitaonrails/ai-memory/releases/tag/v2.3.1
