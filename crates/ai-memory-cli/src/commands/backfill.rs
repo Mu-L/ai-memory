@@ -44,7 +44,7 @@ use ai_memory_workstream::{
     wait_for_transcript_flush,
 };
 
-use super::doctor::SCANNED_HARNESSES;
+use super::doctor::{SCANNED_HARNESSES, relocated_session_dir};
 use super::run;
 use crate::config::Config;
 use crate::http_client::{ServerEndpoint, get_json, post_json};
@@ -268,11 +268,22 @@ async fn collect_local_sessions(
     cwd: &Path,
     only_session: Option<&str>,
 ) -> Vec<SessionRef> {
+    collect_local_sessions_with(home, cwd, only_session, relocated_session_dir).await
+}
+
+/// [`collect_local_sessions`] with the relocation lookup passed in, for the
+/// same reason as `doctor::scan_local_with`: tests pass `|_| None` so a
+/// developer's `CLAUDE_CONFIG_DIR` cannot hide a fixture planted under a
+/// temporary `$HOME`.
+async fn collect_local_sessions_with(
+    home: &Path,
+    cwd: &Path,
+    only_session: Option<&str>,
+    session_dir_for: impl Fn(ManagedHarness) -> Option<PathBuf>,
+) -> Vec<SessionRef> {
     let mut out = Vec::new();
     for &harness in SCANNED_HARNESSES {
-        let session_dir = build_launch_plan(harness, None, Vec::new(), None)
-            .ok()
-            .and_then(|plan| plan.session_dir);
+        let session_dir = session_dir_for(harness);
         let Ok(sessions) = list_native_sessions(
             harness,
             home,
@@ -756,7 +767,7 @@ mod tests {
         });
         std::fs::write(session_dir.join("foreign.jsonl"), format!("{foreign}\n")).unwrap();
 
-        let found = collect_local_sessions(home.path(), cwd.path(), None).await;
+        let found = collect_local_sessions_with(home.path(), cwd.path(), None, |_| None).await;
         let claude: Vec<_> = found
             .iter()
             .filter(|s| s.harness == ManagedHarness::Claude)
@@ -768,7 +779,8 @@ mod tests {
         );
 
         // `--session` narrows to one id.
-        let only = collect_local_sessions(home.path(), cwd.path(), Some("nope")).await;
+        let only =
+            collect_local_sessions_with(home.path(), cwd.path(), Some("nope"), |_| None).await;
         assert!(only.is_empty(), "no session matches the filter: {only:?}");
     }
 
