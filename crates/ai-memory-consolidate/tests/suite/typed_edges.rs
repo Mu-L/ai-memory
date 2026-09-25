@@ -145,6 +145,76 @@ async fn a_declared_contradiction_is_a_lint_finding_without_an_llm() {
 }
 
 #[tokio::test]
+async fn an_unresolved_same_project_link_is_a_broken_link_finding() {
+    let tmp = TempDir::new().unwrap();
+    let store = Store::open(tmp.path()).unwrap();
+    let (ws, proj) = scope(&store).await;
+    let wiki = Wiki::new(tmp.path(), store.writer.clone()).unwrap();
+
+    wiki.write_page(req(
+        ws,
+        proj,
+        "notes/dangling.md",
+        "points at [[notes/missing.md]]",
+        serde_json::json!({}),
+    ))
+    .await
+    .unwrap();
+    // Control: a link that resolves is not reported.
+    wiki.write_page(req(
+        ws,
+        proj,
+        "notes/present.md",
+        "the target",
+        serde_json::json!({}),
+    ))
+    .await
+    .unwrap();
+    wiki.write_page(req(
+        ws,
+        proj,
+        "notes/resolved.md",
+        "see [[notes/present.md]]",
+        serde_json::json!({}),
+    ))
+    .await
+    .unwrap();
+
+    let report = run_lint(
+        &store.reader,
+        &wiki,
+        None,
+        ws,
+        proj,
+        LintOptions {
+            dry_run: true,
+            use_llm: false,
+            decay_lambda: 0.02,
+            embedding: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let broken: Vec<_> = report
+        .findings
+        .iter()
+        .filter(|f| f.kind == "broken_link")
+        .collect();
+    assert_eq!(
+        broken.len(),
+        1,
+        "only the unresolved same-project link is reported: {broken:?}"
+    );
+    assert_eq!(broken[0].pages, vec!["notes/dangling.md"]);
+    assert!(
+        broken[0].message.contains("notes/missing.md"),
+        "{}",
+        broken[0].message
+    );
+}
+
+#[tokio::test]
 async fn a_contradiction_to_a_deleted_page_reports_the_stale_declaration() {
     let tmp = TempDir::new().unwrap();
     let store = Store::open(tmp.path()).unwrap();
