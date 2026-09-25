@@ -25,7 +25,31 @@ struct IngestReport {
     last_persisted_ms: Option<u64>,
 }
 
+/// A server that predates #902 sends no verdict. Reported as `unknown` rather
+/// than assumed safe — guessing here would be the failure this feature exists
+/// to prevent.
+fn unknown_exposure() -> ai_memory_mcp::admin::HttpExposureReport {
+    ai_memory_mcp::admin::HttpExposureReport::Unknown
+}
+
 /// Server-shaped response. Mirrors `ai_memory_mcp::admin::StatusReport`.
+/// One line an operator can read without knowing the enum. The unauthenticated
+/// cases say what to do, because a status line that only names a state leaves
+/// the reader to go looking for the remedy.
+fn describe_exposure(exposure: ai_memory_mcp::admin::HttpExposureReport) -> &'static str {
+    use ai_memory_mcp::admin::HttpExposureReport as E;
+    match exposure {
+        E::Safe => "safe (loopback-only, or authenticated)",
+        E::UnauthenticatedByOverride => {
+            "UNAUTHENTICATED - started with --allow-insecure-no-auth; anyone who can reach the bind address can call destructive tools"
+        }
+        E::UnauthenticatedInContainer => {
+            "UNAUTHENTICATED - no AI_MEMORY_AUTH_TOKEN; reachability depends on the host publish spec. Run `ai-memory generate-auth-token` and set AI_MEMORY_AUTH_TOKEN"
+        }
+        E::Unknown => "unknown (server did not report one)",
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct Report {
     /// Server binary version.
@@ -34,6 +58,11 @@ struct Report {
     data_dir: String,
     /// Server bind address.
     bind: String,
+    /// Whether that bind is reachable without a credential (#902).
+    /// `#[serde(default)]` so this CLI still renders the rest of the report
+    /// against a server old enough not to send the field.
+    #[serde(default = "unknown_exposure")]
+    http_exposure: ai_memory_mcp::admin::HttpExposureReport,
     /// Server-side SQLite path.
     db_path: String,
     /// Lifetime counts.
@@ -215,6 +244,7 @@ pub async fn run(config: &Config, args: StatusArgs) -> Result<()> {
                 "version": report.version,
                 "data_dir": report.data_dir,
                 "bind": report.bind,
+                "http_exposure": report.http_exposure,
                 "db_path": report.db_path,
                 "counts": {
                     "pages_latest": report.counts.pages_latest,
@@ -237,6 +267,10 @@ pub async fn run(config: &Config, args: StatusArgs) -> Result<()> {
         println!("  data-dir:     {}", report.data_dir);
         println!("  db:           {}", report.db_path);
         println!("  bind:         {}", report.bind);
+        println!(
+            "  exposure:     {}",
+            describe_exposure(report.http_exposure)
+        );
         println!(
             "  pages:        {} (all versions: {})",
             report.counts.pages_latest, report.counts.pages_all
@@ -646,5 +680,52 @@ mod tests {
         assert_eq!(spool_age_line(Some(60_000)), "1m 0s");
         assert_eq!(spool_age_line(Some(3_661_000)), "1h 1m");
         assert_eq!(spool_age_line(Some(172_800_000)), "2d 0h");
+    }
+    /// A server predating #902 sends no `http_exposure`. The CLI must still
+    /// render the report, and must not read the absence as "safe" — that would
+    /// be the exact false reassurance this feature exists to prevent.
+    #[test]
+    fn an_older_server_without_the_field_reads_as_unknown_not_safe() {
+        use ai_memory_mcp::admin::HttpExposureReport as E;
+
+        let without: Report = serde_json::from_value(serde_json::json!({
+            "version": "2.3.0",
+            "data_dir": "/data",
+            "bind": "0.0.0.0:49374",
+            "db_path": "/data/ai-memory.db",
+            "counts": { "pages_latest": 0, "pages_all": 0, "sessions": 0, "observations": 0 },
+        }))
+        .expect("an older server's status must still deserialise");
+        assert_eq!(without.http_exposure, E::Unknown);
+        assert_ne!(without.http_exposure, E::Safe);
+
+        let with: Report = serde_json::from_value(serde_json::json!({
+            "version": "2.4.0",
+            "data_dir": "/data",
+            "bind": "0.0.0.0:49374",
+            "db_path": "/data/ai-memory.db",
+            "counts": { "pages_latest": 0, "pages_all": 0, "sessions": 0, "observations": 0 },
+            "http_exposure": "unauthenticated-in-container",
+        }))
+        .expect("a current server's status must deserialise");
+        assert_eq!(with.http_exposure, E::UnauthenticatedInContainer);
+    }
+
+    /// The unauthenticated lines have to carry the remedy: an operator reading
+    /// `ai-memory status` should not have to go looking for what to do.
+    #[test]
+    fn unauthenticated_states_are_described_with_their_remedy() {
+        use ai_memory_mcp::admin::HttpExposureReport as E;
+
+        assert!(describe_exposure(E::Safe).contains("safe"));
+        assert!(describe_exposure(E::Unknown).contains("unknown"));
+
+        let override_line = describe_exposure(E::UnauthenticatedByOverride);
+        assert!(override_line.contains("UNAUTHENTICATED"));
+        assert!(override_line.contains("--allow-insecure-no-auth"));
+
+        let container_line = describe_exposure(E::UnauthenticatedInContainer);
+        assert!(container_line.contains("UNAUTHENTICATED"));
+        assert!(container_line.contains("AI_MEMORY_AUTH_TOKEN"));
     }
 }
