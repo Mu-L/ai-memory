@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mean latency instead of 20.2 s — in that run the hosted mean sat on the
   server's 20 s completion timeout, which made the reranker stall every
   query before falling back. (#873)
+- `ai-memory status` (text and `--json`) and `GET /admin/status` report the
+  server's HTTP exposure, so an unauthenticated bind is pollable by a monitor.
+  The verdict is admin-gated at parity with the existing `bind`/`data_dir`
+  fields and defaults to `Unknown` (never `Safe`) when unset or read by an
+  older client. (#904)
 
 ### Changed
 - Quieted the default server log: the reconciliation-pass summary that fired
@@ -36,6 +41,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server's log). Both are restorable through `log_level` (e.g.
   `"info,rmcp=info"` or `"debug"`) or `RUST_LOG`; the `tracing_appender=warn`
   feedback-loop guard stays non-overridable. (#894)
+- An unauthenticated non-loopback bind is now announced on stderr at startup
+  independent of the log filter (a direct `eprintln!`, not a filterable
+  `tracing` warning), so `RUST_LOG=error` or a container's quiet log no longer
+  hides it. The refuse path for a non-loopback unauthenticated host bind is
+  unchanged — this only makes the existing warning reliably visible. (#903)
 
 ### Fixed
 - The default log filter's `rmcp=warn` cap (#894) no longer raises rmcp
@@ -61,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   word, and a hyphen early in the title (a short first word before one long
   token) collapsed the slug to that single word. The cut now counts a hyphen
   at position 60 and ignores one in the first half, falling back to the hard
-  cut at 60. (#886)
+  cut at 60. (#886, #910)
 - On Windows, `ai-memory run` recognises an OpenCode session as belonging
   to the current checkout again. `native_session_in_checkout` (#880) compared
   the stored `directory` with the backslash `cwd` exactly, while OpenCode
