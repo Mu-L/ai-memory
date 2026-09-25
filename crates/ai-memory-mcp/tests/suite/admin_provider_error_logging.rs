@@ -105,7 +105,6 @@ async fn make_admin_state(tmp: &TempDir, llm: Option<Arc<dyn LlmProvider>>) -> A
         data_dir: tmp.path().to_path_buf(),
         db_path,
         bind: "127.0.0.1:0".to_string(),
-        http_exposure: std::sync::Arc::new(std::sync::OnceLock::new()),
         home_dir: None,
         bootstrap_lock: Arc::new(tokio::sync::Mutex::new(())),
         token_pepper: None,
