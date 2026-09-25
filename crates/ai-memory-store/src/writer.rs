@@ -169,16 +169,19 @@ pub(crate) enum WriteCmd {
     EndAdmittedSession {
         admitted: AdmittedSession,
         summary_page_id: Option<PageId>,
+        occurred_at: Option<i64>,
         reply: oneshot::Sender<StoreResult<()>>,
     },
     EndAdmittedSessionWithHandoff {
         admitted: AdmittedSession,
         summary_page_id: Option<PageId>,
         handoff: NewHandoff,
+        occurred_at: Option<i64>,
         reply: oneshot::Sender<StoreResult<HandoffId>>,
     },
     EndAdmittedLifecycleOnlySession {
         admitted: AdmittedSession,
+        occurred_at: Option<i64>,
         reply: oneshot::Sender<StoreResult<LifecycleOnlyEndOutcome>>,
     },
     CompleteObservationIngest {
@@ -1049,15 +1052,20 @@ impl WriterHandle {
     }
 
     /// Guarded hook end.
+    ///
+    /// `occurred_at` is the SessionEnd event's own original time (microseconds),
+    /// when known; `None` falls back to "now" at the store boundary.
     pub async fn end_admitted_session(
         &self,
         admitted: AdmittedSession,
         summary_page_id: Option<PageId>,
+        occurred_at: Option<i64>,
     ) -> StoreResult<()> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::EndAdmittedSession {
             admitted,
             summary_page_id,
+            occurred_at,
             reply: tx,
         })
         .await?;
@@ -1065,17 +1073,22 @@ impl WriterHandle {
     }
 
     /// Guarded hook end plus automatic handoff.
+    ///
+    /// `occurred_at` is the SessionEnd event's own original time (microseconds),
+    /// when known; `None` falls back to "now" at the store boundary.
     pub async fn end_admitted_session_with_handoff(
         &self,
         admitted: AdmittedSession,
         summary_page_id: Option<PageId>,
         handoff: NewHandoff,
+        occurred_at: Option<i64>,
     ) -> StoreResult<HandoffId> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::EndAdmittedSessionWithHandoff {
             admitted,
             summary_page_id,
             handoff,
+            occurred_at,
             reply: tx,
         })
         .await?;
@@ -1083,13 +1096,18 @@ impl WriterHandle {
     }
 
     /// Guarded hook lifecycle-only end.
+    ///
+    /// `occurred_at` is the SessionEnd event's own original time (microseconds),
+    /// when known; `None` falls back to "now" at the store boundary.
     pub async fn end_admitted_lifecycle_only_session(
         &self,
         admitted: AdmittedSession,
+        occurred_at: Option<i64>,
     ) -> StoreResult<LifecycleOnlyEndOutcome> {
         let (tx, rx) = oneshot::channel();
         self.send(WriteCmd::EndAdmittedLifecycleOnlySession {
             admitted,
+            occurred_at,
             reply: tx,
         })
         .await?;
@@ -2909,16 +2927,22 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
             WriteCmd::EndAdmittedSession {
                 admitted,
                 summary_page_id,
+                occurred_at,
                 reply,
             } => {
-                let result =
-                    ops::end_admitted_session(&mut conn, &admitted, summary_page_id.as_ref());
+                let result = ops::end_admitted_session(
+                    &mut conn,
+                    &admitted,
+                    summary_page_id.as_ref(),
+                    occurred_at,
+                );
                 send_or_warn(reply, result, "end_admitted_session");
             }
             WriteCmd::EndAdmittedSessionWithHandoff {
                 admitted,
                 summary_page_id,
                 handoff,
+                occurred_at,
                 reply,
             } => {
                 let result = ops::end_admitted_session_with_handoff(
@@ -2926,11 +2950,17 @@ fn worker_loop(mut conn: Connection, mut rx: mpsc::Receiver<WriteCmd>) {
                     &admitted,
                     summary_page_id.as_ref(),
                     &handoff,
+                    occurred_at,
                 );
                 send_or_warn(reply, result, "end_admitted_session_with_handoff");
             }
-            WriteCmd::EndAdmittedLifecycleOnlySession { admitted, reply } => {
-                let result = ops::end_admitted_lifecycle_only_session(&mut conn, &admitted);
+            WriteCmd::EndAdmittedLifecycleOnlySession {
+                admitted,
+                occurred_at,
+                reply,
+            } => {
+                let result =
+                    ops::end_admitted_lifecycle_only_session(&mut conn, &admitted, occurred_at);
                 send_or_warn(reply, result, "end_admitted_lifecycle_only_session");
             }
             WriteCmd::CompleteObservationIngest {
@@ -3950,6 +3980,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: sid,
                 workspace_id: ws,
                 project_id: src,

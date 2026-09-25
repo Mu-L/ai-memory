@@ -588,6 +588,7 @@ async fn move_project_true_move_preserves_sessions_and_observations() {
     store
         .writer
         .begin_session(NewSession {
+            occurred_at: None,
             id: sid,
             workspace_id: src_ws,
             project_id: src_proj,
@@ -601,6 +602,7 @@ async fn move_project_true_move_preserves_sessions_and_observations() {
         .writer
         .insert_observation(Sanitized::new(
             NewObservation {
+                occurred_at: None,
                 session_id: sid,
                 workspace_id: src_ws,
                 project_id: src_proj,

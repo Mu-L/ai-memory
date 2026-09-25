@@ -138,6 +138,7 @@ async fn seed_session(
     store
         .writer
         .begin_session(NewSession {
+            occurred_at: None,
             id: sid,
             workspace_id: ws,
             project_id: proj,
@@ -152,6 +153,7 @@ async fn seed_session(
             .writer
             .insert_observation(Sanitized::new(
                 NewObservation {
+                    occurred_at: None,
                     session_id: sid,
                     workspace_id: ws,
                     project_id: proj,
@@ -515,6 +517,7 @@ async fn move_session_pending_job_or_open_session_needs_force() {
         .writer
         .insert_observation(Sanitized::new(
             NewObservation {
+                occurred_at: None,
                 session_id: sid,
                 workspace_id: scopes.ws,
                 project_id: scopes.src,
@@ -573,6 +576,7 @@ async fn move_session_pending_job_or_open_session_needs_force() {
     store
         .writer
         .begin_session(NewSession {
+            occurred_at: None,
             id: open,
             workspace_id: scopes.ws,
             project_id: scopes.src,
@@ -689,6 +693,7 @@ async fn move_session_batch_stops_at_first_error_and_reports_progress() {
     store
         .writer
         .begin_session(NewSession {
+            occurred_at: None,
             id: open,
             workspace_id: scopes.ws,
             project_id: scopes.src,
@@ -925,6 +930,7 @@ async fn scatter_observations(
             .writer
             .insert_observation(Sanitized::new(
                 NewObservation {
+                    occurred_at: None,
                     session_id: sid,
                     workspace_id: ws,
                     project_id: proj,
@@ -1035,6 +1041,7 @@ async fn move_session_rehome_of_open_session_needs_no_force() {
     store
         .writer
         .begin_session(NewSession {
+            occurred_at: None,
             id: sid,
             workspace_id: scopes.ws,
             project_id: scopes.dst,

@@ -827,6 +827,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: out_of_scope_session,
                 workspace_id: ws,
                 project_id: other,
@@ -1727,6 +1728,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: claimed_session,
                 workspace_id: src_ws,
                 project_id: proj,
@@ -2082,6 +2084,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: SessionId::new(),
                 workspace_id: ws,
                 project_id: proj,
@@ -3206,6 +3209,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: session_id,
                 workspace_id: ws,
                 project_id: proj,
@@ -3219,6 +3223,7 @@ mod tests {
             .writer
             .insert_observation(Sanitized::new(
                 NewObservation {
+                    occurred_at: None,
                     session_id,
                     workspace_id: ws,
                     project_id: proj,
@@ -3266,6 +3271,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: session_id,
                 workspace_id: ws,
                 project_id: proj,
@@ -3279,6 +3285,7 @@ mod tests {
             .writer
             .insert_observation(Sanitized::new(
                 NewObservation {
+                    occurred_at: None,
                     session_id,
                     workspace_id: ws,
                     project_id: proj,
@@ -3340,6 +3347,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id: session_id,
                     workspace_id: ws,
                     project_id,
@@ -3351,6 +3359,7 @@ mod tests {
                 .unwrap();
         }
         let obs = |session_id, project_id| NewObservation {
+            occurred_at: None,
             session_id,
             workspace_id: ws,
             project_id,
@@ -3454,6 +3463,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id,
                     workspace_id: ws,
                     project_id: proj,
@@ -3499,6 +3509,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: session_id,
                 workspace_id: ws,
                 project_id: proj,
@@ -3609,6 +3620,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: session_id,
                 workspace_id: ws,
                 project_id: proj,
@@ -3643,6 +3655,7 @@ mod tests {
             .writer
             .insert_observation(Sanitized::new(
                 NewObservation {
+                    occurred_at: None,
                     session_id,
                     workspace_id: ws,
                     project_id: proj,
@@ -3686,6 +3699,7 @@ mod tests {
             .writer
             .insert_observation(Sanitized::new(
                 NewObservation {
+                    occurred_at: None,
                     session_id,
                     workspace_id: ws,
                     project_id: proj,
@@ -3747,6 +3761,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: historical,
                 workspace_id: ws,
                 project_id: proj,
@@ -3778,6 +3793,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id,
                     workspace_id: ws,
                     project_id: proj,
@@ -3853,6 +3869,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: reviewed_after_watermark,
                 workspace_id: ws,
                 project_id: proj,
@@ -3928,6 +3945,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id: historical,
                     workspace_id: ws,
                     project_id,
@@ -3955,6 +3973,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id: session_id,
                     workspace_id: ws,
                     project_id,
@@ -3998,6 +4017,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: first_session,
                 workspace_id: ws,
                 project_id: proj,
@@ -4045,6 +4065,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id,
                     workspace_id: ws,
                     project_id: proj,
@@ -4124,6 +4145,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: session,
                 workspace_id: ws,
                 project_id: proj,
@@ -4262,6 +4284,7 @@ mod tests {
         store
             .writer
             .begin_session(NewSession {
+                occurred_at: None,
                 id: session_id,
                 workspace_id: ws,
                 project_id: proj,
@@ -4344,6 +4367,7 @@ mod tests {
             super::ops::insert_observation(
                 &mut conn,
                 &NewObservation {
+                    occurred_at: None,
                     session_id,
                     workspace_id: ws,
                     project_id: proj,
@@ -6117,6 +6141,7 @@ mod tests {
             store
                 .writer
                 .begin_session(NewSession {
+                    occurred_at: None,
                     id: session_id,
                     workspace_id,
                     project_id,

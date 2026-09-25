@@ -58,6 +58,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starts: index row and file, with the same version row, `updated_at`,
   `generated.at` and body, in one wiki commit, and nothing to do on later
   starts. (#917)
+- `ai-memory backfill` stamps each imported session and observation with the
+  transcript's own event time instead of the moment it was imported, so a
+  transcript from weeks ago no longer looks like it just happened. An event
+  without a valid timestamp inherits the nearest one, and the session's start
+  and end are the earliest and latest event times. The `/hook` body accepts a
+  top-level RFC 3339 `occurred_at`; it must be positive and no more than five
+  minutes in the future, and anything missing, malformed or out of bounds
+  falls back to "now" instead of failing the hook. Because an imported
+  session now ends in the past, it can sit below the auto-improve watermark
+  and the experience-pass anchor (no automatic review until a newer session
+  moves them), an opt-in observation retention window can prune its older
+  observations right after import, and the "most recently active project"
+  fallback after a restart may not pick a project that was just backfilled.
+  (#919)
 - The default log filter's `rmcp=warn` cap (#894) no longer raises rmcp
   above a quieter `log_level`. A target directive beats the global level
   either way, so with `log_level = "error"` or `"off"` the cap re-enabled the
