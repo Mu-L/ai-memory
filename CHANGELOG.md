@@ -62,6 +62,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token) collapsed the slug to that single word. The cut now counts a hyphen
   at position 60 and ignores one in the first half, falling back to the hard
   cut at 60. (#886)
+- On Windows, `ai-memory run` recognises an OpenCode session as belonging
+  to the current checkout again. `native_session_in_checkout` (#880) compared
+  the stored `directory` with the backslash `cwd` exactly, while OpenCode
+  stores forward slashes (#891), so the check never matched there; it now uses
+  the same two spellings as the other OpenCode lookups (#882). (#906)
 - A manual `memory_consolidate` now reconciles the session's durable
   consolidation job row. The MCP handler wrote the page directly through the
   consolidator without touching `session_consolidation_jobs`, so a session
